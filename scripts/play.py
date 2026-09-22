@@ -98,19 +98,98 @@ def _network_depth_for_display(
     return depth[env_idx].reshape(history_length, height, width)
 
 
-class NetworkDepthViserPlayViewer(ViserPlayViewer):
-    """Viser playback with the newest exact policy-depth frame."""
+class TerrainTaskViserPlayViewer(ViserPlayViewer):
+    """Viser playback with runtime buttons for the supported stair tasks."""
+
+    _TASK_LABELS = {
+        "stairs_up": "上楼梯",
+        "stairs_down": "下楼梯",
+    }
 
     def __init__(
         self,
         env,
         policy,
+        terrain_level: int | None = None,
+        terrain_type: str = "all",
+    ) -> None:
+        self._terrain_level = terrain_level
+        self._terrain_task_type = (
+            terrain_type if terrain_type in self._TASK_LABELS else None
+        )
+        self._terrain_task_status = None
+        super().__init__(env, policy)
+
+    def setup(self) -> None:
+        super().setup()
+
+        terrain = self.env.unwrapped.scene.terrain
+        generator = None if terrain is None else terrain.cfg.terrain_generator
+        available = () if generator is None else tuple(generator.sub_terrains)
+        self._terrain_task_types = {
+            self._TASK_LABELS[name]: name
+            for name in ("stairs_up", "stairs_down")
+            if name in available
+        }
+        if not self._terrain_task_types:
+            return
+
+        with self._server.gui.add_folder("任务选择"):
+            self._terrain_task_buttons = self._server.gui.add_button_group(
+                "任务",
+                options=list(self._terrain_task_types),
+            )
+            initial = (
+                f"当前任务：**{self._TASK_LABELS[self._terrain_task_type]}**"
+                if self._terrain_task_type is not None
+                else "当前任务：请选择上楼梯或下楼梯"
+            )
+            self._terrain_task_status = self._server.gui.add_markdown(initial)
+
+        @self._terrain_task_buttons.on_click
+        def _on_task_click(event) -> None:
+            self.request_action("TERRAIN_TASK", event.target.value)
+
+    def _handle_custom_action(self, action, payload) -> bool:
+        del action
+        task_types = getattr(self, "_terrain_task_types", {})
+        if payload not in task_types:
+            return False
+
+        terrain_type = task_types[payload]
+        env = self.env.unwrapped
+        # The reset event reads this attribute, so every subsequent reset keeps
+        # the task selected in the GUI instead of sampling a random terrain.
+        env._play_terrain_type = terrain_type
+        self._terrain_task_type = terrain_type
+        self.reset_environment()
+        if self._terrain_task_status is not None:
+            self._terrain_task_status.content = (
+                f"当前任务：**{self._TASK_LABELS[terrain_type]}**（已重置）"
+            )
+        return True
+
+
+class NetworkDepthViserPlayViewer(TerrainTaskViserPlayViewer):
+    """Viser playback with stair-task buttons and policy-depth visualization."""
+
+    def __init__(
+        self,
+        env,
+        policy,
+        terrain_level: int | None = None,
+        terrain_type: str = "all",
         network_depth_group: str = "camera",
         network_depth_term: str = "front_depth",
     ) -> None:
         self._network_depth_group = network_depth_group
         self._network_depth_term = network_depth_term
-        super().__init__(env, policy)
+        super().__init__(
+            env,
+            policy,
+            terrain_level=terrain_level,
+            terrain_type=terrain_type,
+        )
 
     def setup(self) -> None:
         super().setup()
@@ -162,9 +241,11 @@ class NetworkDepthViserPlayViewer(ViserPlayViewer):
 def _set_play_terrain_origin(
     env: ManagerBasedRlEnv,
     env_ids: torch.Tensor | slice | None,
-    terrain_level: int,
+    terrain_level: int | None,
+    terrain_type: str | None = None,
+    terrain_selector: dict[str, str | None] | None = None,
 ) -> None:
-    """Select a fixed generated-terrain difficulty row for play resets."""
+    """Select generated-terrain difficulty and type for play resets."""
     terrain = env.scene.terrain
     if terrain is None or terrain.terrain_origins is None:
         return
@@ -176,53 +257,105 @@ def _set_play_terrain_origin(
         env_ids = env_ids.to(device=device, dtype=torch.long)
 
     num_rows, num_cols = terrain.terrain_origins.shape[:2]
-    if terrain_level < 0 or terrain_level >= num_rows:
-        raise ValueError(
-            f"terrain_level={terrain_level} is out of range [0, {num_rows - 1}]"
+    if terrain_level is None:
+        levels = torch.randint(0, num_rows, (len(env_ids),), device=device)
+    else:
+        if terrain_level < 0 or terrain_level >= num_rows:
+            raise ValueError(
+                f"terrain_level={terrain_level} is out of range [0, {num_rows - 1}]"
+            )
+        levels = torch.full(
+            (len(env_ids),), terrain_level, device=device, dtype=torch.long
         )
-    levels = torch.full(
-        (len(env_ids),), terrain_level, device=device, dtype=torch.long
-    )
-    types = torch.randint(0, num_cols, (len(env_ids),), device=device)
+
+    if terrain_selector is not None:
+        selected_type = getattr(env, "_play_terrain_type", None)
+        terrain_type = selected_type or terrain_selector.get("type")
+    if terrain_type is None:
+        types = torch.randint(0, num_cols, (len(env_ids),), device=device)
+    else:
+        terrain_generator = terrain.cfg.terrain_generator
+        if terrain_generator is None:
+            raise ValueError("A terrain type was requested without a terrain generator.")
+        available_types = tuple(terrain_generator.sub_terrains)
+        if terrain_type not in available_types:
+            raise ValueError(
+                f"Unknown terrain type {terrain_type!r}; available types: {available_types}"
+            )
+        type_index = available_types.index(terrain_type)
+        if type_index >= num_cols:
+            raise ValueError(
+                f"Terrain type {terrain_type!r} is not present in the generated terrain."
+            )
+        types = torch.full(
+            (len(env_ids),), type_index, device=device, dtype=torch.long
+        )
     terrain.terrain_levels[env_ids] = levels
     terrain.terrain_types[env_ids] = types
     terrain.env_origins[env_ids] = terrain.terrain_origins[levels, types]
 
 
-def _configure_play_terrain_level(env_cfg, terrain_level: int | None) -> None:
-    """Configure deterministic difficulty rows before creating the play scene."""
-    if terrain_level is None:
-        return
-
+def _configure_play_terrain(
+    env_cfg,
+    terrain_level: int | None,
+    terrain_type: Literal["all", "flat", "stairs_up", "stairs_down"],
+) -> None:
+    """Configure fixed difficulty and/or sub-terrain type before scene creation."""
     terrain_cfg = env_cfg.scene.terrain
     terrain_generator = None if terrain_cfg is None else terrain_cfg.terrain_generator
     if terrain_generator is None:
-        raise ValueError("--terrain-level requires a generated terrain.")
+        raise ValueError("--terrain-level/--terrain-type requires a generated terrain.")
 
     terrain_generator.curriculum = True
     terrain_generator.num_rows = max(terrain_generator.num_rows, 10)
-    if terrain_level < 0 or terrain_level >= terrain_generator.num_rows:
+    if terrain_level is not None and (
+        terrain_level < 0 or terrain_level >= terrain_generator.num_rows
+    ):
         raise ValueError(
             f"terrain_level={terrain_level} is out of range "
             f"[0, {terrain_generator.num_rows - 1}]"
         )
 
-    terrain_generator.sub_terrains = {
-        name: replace(sub_cfg, proportion=1.0)
-        for name, sub_cfg in terrain_generator.sub_terrains.items()
-    }
+    if terrain_type == "all":
+        terrain_generator.sub_terrains = {
+            name: replace(sub_cfg, proportion=1.0)
+            for name, sub_cfg in terrain_generator.sub_terrains.items()
+        }
+    else:
+        if terrain_type not in terrain_generator.sub_terrains:
+            raise ValueError(
+                f"Unknown terrain type {terrain_type!r}; available types: "
+                f"{tuple(terrain_generator.sub_terrains)}"
+            )
+        terrain_generator.sub_terrains = {
+            terrain_type: replace(
+                terrain_generator.sub_terrains[terrain_type], proportion=1.0
+            )
+        }
     terrain_generator.num_cols = len(terrain_generator.sub_terrains)
 
     env_cfg.events.pop("randomize_terrain", None)
+    terrain_selector = {
+        "type": None if terrain_type == "all" else terrain_type,
+    }
     env_cfg.events = {
         "select_terrain": EventTermCfg(
             func=_set_play_terrain_origin,
             mode="reset",
-            params={"terrain_level": terrain_level},
+            params={
+                "terrain_level": terrain_level,
+                "terrain_type": None,
+                "terrain_selector": terrain_selector,
+            },
         ),
         **env_cfg.events,
     }
-    print(f"[INFO] Play terrain selection: fixed level={terrain_level}")
+    if terrain_level is None:
+        print("[INFO] Play terrain selection: random difficulty row")
+    else:
+        print(f"[INFO] Play terrain selection: fixed level={terrain_level}")
+    if terrain_type != "all":
+        print(f"[INFO] Play terrain type: fixed {terrain_type}")
 
 
 @dataclass(frozen=True)
@@ -234,6 +367,8 @@ class PlayConfig:
     no_terminations: bool = False
     terrain_level: int | None = None
     """Fixed generated-terrain difficulty row for play resets."""
+    terrain_type: Literal["all", "flat", "stairs_up", "stairs_down"] = "all"
+    """Restrict generated terrain to one type; ``all`` keeps all types."""
     network_depth_vis: bool = False
     """Show the newest exact network-depth input in the Viser GUI."""
     network_depth_group: str = "camera"
@@ -257,7 +392,7 @@ def run_play(cfg: PlayConfig) -> None:
     env_cfg = load_env_cfg(TASK_ID, play=True)
     agent_cfg = load_rl_cfg(TASK_ID)
     env_cfg.scene.num_envs = cfg.num_envs
-    _configure_play_terrain_level(env_cfg, cfg.terrain_level)
+    _configure_play_terrain(env_cfg, cfg.terrain_level, cfg.terrain_type)
     if cfg.no_terminations:
         env_cfg.terminations = {}
 
@@ -297,11 +432,18 @@ def run_play(cfg: PlayConfig) -> None:
             NetworkDepthViserPlayViewer(
                 wrapped,
                 policy,
+                terrain_level=cfg.terrain_level,
+                terrain_type=cfg.terrain_type,
                 network_depth_group=cfg.network_depth_group,
                 network_depth_term=cfg.network_depth_term,
             ).run()
         else:
-            ViserPlayViewer(wrapped, policy).run()
+            TerrainTaskViserPlayViewer(
+                wrapped,
+                policy,
+                terrain_level=cfg.terrain_level,
+                terrain_type=cfg.terrain_type,
+            ).run()
     finally:
         env.close()
 
