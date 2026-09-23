@@ -72,10 +72,9 @@ GO2_XML = REPO_ROOT / "src/assets/robots/unitree_go2/xmls/go2.xml"
 STAIRS_SCENE_XML = Path(__file__).resolve().parent / "assets/scene_stairs.xml"
 DEPTH_CAMERA_NAME = "front_depth"
 DEPTH_CAMERA_VISUAL_NAME = "front_depth_camera_visual"
-# Match the Stair camera shell: a 9.0 cm-wide, 3.6 cm-high, 2.4 cm-deep black
-# cuboid. Go2's camera frame swaps the horizontal/vertical axes relative to the
-# G1 reference, so its local X half-size is the longer one. Its front face is
-# 1 mm behind the optical center along camera-local +Z.
+# Use a 9.0 cm-wide, 3.6 cm-high, 2.4 cm-deep black camera shell. Its local X
+# half-size is the longer one, and its front face is 1 mm behind the optical
+# center along camera-local +Z.
 DEPTH_CAMERA_VISUAL_SIZE = (0.045, 0.018, 0.012)
 DEPTH_CAMERA_VISUAL_POS = (0.332784, 0.0, 0.074446)
 DEPTH_CAMERA_VISUAL_RGBA = (0.0, 0.0, 0.0, 1.0)
@@ -257,7 +256,7 @@ def _load_robot_spec() -> mujoco.MjSpec:
 
 
 def _load_reference_stairs_spec() -> mujoco.MjSpec:
-    """Load the Stair-style up/landing/down scene and attach training Go2."""
+    """Load the PIE up/landing/down scene and attach the training Go2."""
     if not STAIRS_SCENE_XML.is_file():
         raise FileNotFoundError(f"PIE stairs scene XML not found: {STAIRS_SCENE_XML}")
     scene_spec = mujoco.MjSpec.from_file(str(STAIRS_SCENE_XML))

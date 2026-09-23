@@ -11,12 +11,6 @@ setup(
     # setuptools from treating the XML/mesh directories as Python namespaces.
     include_package_data=False,
     package_data={
-        "deploy.stair.sim2sim": [
-            "assets/unitree_g1/LICENSE",
-            "assets/unitree_g1/ASSET_SOURCE.md",
-            "assets/unitree_g1/*.xml",
-            "assets/unitree_g1/meshes/*.STL",
-        ],
         "deploy.pie.sim2sim": ["assets/*.xml"],
         "src.assets.robots.unitree_go2": [
             "xmls/*.xml",

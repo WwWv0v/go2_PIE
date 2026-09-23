@@ -1,1 +1,1 @@
-"""Standalone deployment utilities for the G1 Stair policy."""
+"""Standalone deployment utilities for the Go2 PIE policy."""

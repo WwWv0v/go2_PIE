@@ -5,8 +5,7 @@
       y=0.0: ground -> 6 stairs up -> flat landing -> 6 stairs down -> ground
       y=2.4: parallel level-9 route with the same layout
 
-    The reference stair geometry follows
-    deploy/stair/sim2sim/assets/scene_stair.xml:
+    Reference route dimensions:
       course width = 2.00 m
       stair tread  = 0.30 m
       stair rise   = 0.12 m
@@ -81,7 +80,7 @@
 
     <!--
       Down staircase: five raised treads, followed by the sixth and final
-      0.12 m descent onto the ground plane, exactly like scene_stair.xml.
+      0.12 m descent onto the ground plane.
     -->
     <geom name="stairs_down_step_01" type="box" pos="5.15 0 0.54" size="0.15 1.00 0.06" material="stairs" />
     <geom name="stairs_down_step_02" type="box" pos="5.45 0 0.42" size="0.15 1.00 0.06" material="stairs" />
