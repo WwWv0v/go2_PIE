@@ -10,6 +10,8 @@ __pycache__/
 build/
 dist/
 
+*.docx
+
 logs/*
 !logs/rsl_rl/
 logs/rsl_rl/*
