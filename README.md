@@ -4,9 +4,9 @@
 
 `parkour_mjlab` is a reinforcement learning codebase built on MJLab for perceptive locomotion with the Unitree Go2 quadruped robot.
 
-## Real-World Demo
+## Go2 Demo
 
-[![Unitree Go2 real-world demo](docs/go2_real_world_demo.jpg)](docs/go2_real_world_demo.mp4)
+![Unitree Go2 demo](docs/go2_demo.gif)
 
 ## Installation
 
